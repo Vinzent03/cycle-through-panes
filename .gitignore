@@ -13,3 +13,6 @@ main.js
 
 # obsidian
 data.json
+
+# .DS_Store
+.DS_Store

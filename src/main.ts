@@ -1,3 +1,5 @@
+// main.ts
+
 import { Platform, Plugin, WorkspaceLeaf } from "obsidian";
 import { GeneralModal } from "./modal";
 import CTPSettingTab from "./settingsTab";
@@ -7,10 +9,14 @@ export default class CycleThroughPanes extends Plugin {
     settings: Settings;
     ctrlPressedTimestamp = 0;
     ctrlKeyCode: string | undefined;
-    queuedFocusLeaf: WorkspaceLeaf;
+    queuedFocusLeaf: WorkspaceLeaf | undefined;
     leafIndex = 0;
     modal: GeneralModal | undefined;
-    leaves: WorkspaceLeaf[];
+    leaves: WorkspaceLeaf[] | null = null;
+
+    // New variables for tab history
+    tabHistory: string[] = [];
+    tabHistoryPerWorkspace: { [workspaceId: string]: string[] } = {};
 
     keyDownFunc = this.onKeyDown.bind(this);
     keyUpFunc = this.onKeyUp.bind(this);
@@ -52,12 +58,22 @@ export default class CycleThroughPanes extends Plugin {
     }
 
     async onload() {
-        console.log("loading plugin: Cycle through panes");
+        // console.log("Loading plugin: Cycle through panes");
 
         await this.loadSettings();
 
         this.addSettingTab(new CTPSettingTab(this, this.settings));
 
+        // Initialize tab history per workspace after the layout is ready
+        this.app.workspace.onLayoutReady(() => {
+            const workspaceId = this.getWorkspaceId();
+            this.tabHistory = this.tabHistoryPerWorkspace[workspaceId] || [];
+
+            // Debug log
+            // console.log("Loaded tabHistory for workspace:", workspaceId, this.tabHistory);
+        });
+
+        // Add commands
         this.addCommand({
             id: "cycle-through-panes",
             name: "Go to right tab",
@@ -153,16 +169,16 @@ export default class CycleThroughPanes extends Plugin {
             id: "focus-left-sidebar",
             name: "Focus on left sidebar",
             callback: () => {
-                app.workspace.leftSplit.expand();
-                let leaf: WorkspaceLeaf;
-                app.workspace.iterateAllLeaves((e) => {
-                    if (e.getRoot() == app.workspace.leftSplit) {
+                this.app.workspace.leftSplit.expand();
+                let leaf: WorkspaceLeaf | undefined;
+                this.app.workspace.iterateAllLeaves((e) => {
+                    if (e.getRoot() == this.app.workspace.leftSplit) {
                         if (e.activeTime > (leaf?.activeTime || 0)) {
                             leaf = e;
                         }
                     }
                 });
-                this.queueFocusLeaf(leaf);
+                if (leaf) this.queueFocusLeaf(leaf);
             },
         });
 
@@ -170,16 +186,16 @@ export default class CycleThroughPanes extends Plugin {
             id: "focus-right-sidebar",
             name: "Focus on right sidebar",
             callback: () => {
-                app.workspace.rightSplit.expand();
-                let leaf: WorkspaceLeaf;
-                app.workspace.iterateAllLeaves((e) => {
-                    if (e.getRoot() == app.workspace.rightSplit) {
+                this.app.workspace.rightSplit.expand();
+                let leaf: WorkspaceLeaf | undefined;
+                this.app.workspace.iterateAllLeaves((e) => {
+                    if (e.getRoot() == this.app.workspace.rightSplit) {
                         if (e.activeTime > (leaf?.activeTime || 0)) {
                             leaf = e;
                         }
                     }
                 });
-                this.queueFocusLeaf(leaf);
+                if (leaf) this.queueFocusLeaf(leaf);
             },
         });
 
@@ -197,6 +213,7 @@ export default class CycleThroughPanes extends Plugin {
                 }
             },
         });
+
         this.addCommand({
             id: "focus-on-last-active-pane-reverse",
             name: "Go to next tab",
@@ -212,6 +229,14 @@ export default class CycleThroughPanes extends Plugin {
                 }
             },
         });
+
+        // Add event listeners
+        this.registerEvent(
+            this.app.workspace.on('active-leaf-change', this.onActiveLeafChange.bind(this))
+        );
+        this.registerEvent(
+            this.app.workspace.on('layout-change', this.onLayoutChange.bind(this))
+        );
 
         window.addEventListener("keydown", this.keyDownFunc);
         window.addEventListener("keyup", this.keyUpFunc);
@@ -235,11 +260,11 @@ export default class CycleThroughPanes extends Plugin {
                 this.app.workspace.setActiveLeaf(leaf, { focus: true });
             }
             if (leaf.getViewState().type == "search") {
-                const search = leaf.view.containerEl.find(
+                const search = leaf.view.containerEl.querySelector(
                     ".search-input-container input"
-                );
+                ) as HTMLElement;
 
-                search.focus();
+                search?.focus();
             }
         }
     }
@@ -247,11 +272,89 @@ export default class CycleThroughPanes extends Plugin {
     setLeaves() {
         if (!this.leaves) {
             const leaves = this.getLeavesOfTypes(this.settings.viewTypes);
-            leaves.sort((a, b) => {
-                return b.activeTime - a.activeTime;
-            });
-            this.leaves = leaves;
-            this.leafIndex = leaves.indexOf(this.app.workspace.activeLeaf);
+            const filePathToLeaf = new Map<string, WorkspaceLeaf>();
+            for (const leaf of leaves) {
+                const file = leaf.view.file;
+                if (file) {
+                    filePathToLeaf.set(file.path, leaf);
+                }
+            }
+            this.leaves = [];
+            for (const path of this.tabHistory) {
+                const leaf = filePathToLeaf.get(path);
+                if (leaf) {
+                    this.leaves.push(leaf);
+                }
+            }
+            // Add any leaves not in tabHistory to the end
+            for (const leaf of leaves) {
+                if (!this.leaves.contains(leaf)) {
+                    this.leaves.push(leaf);
+                }
+            }
+            this.leafIndex = this.leaves.indexOf(this.app.workspace.activeLeaf);
+
+            // Debug log
+            // console.log("Set leaves based on tab history:", this.leaves);
+        }
+    }
+
+    onActiveLeafChange(leaf: WorkspaceLeaf) {
+        const file = leaf.view.file;
+        if (file) {
+            // Remove the file path if it exists in the history
+            const index = this.tabHistory.indexOf(file.path);
+            if (index !== -1) {
+                this.tabHistory.splice(index, 1);
+            }
+            // Add the file path to the start of the history
+            this.tabHistory.unshift(file.path);
+            // Keep the history to a reasonable length
+            if (this.tabHistory.length > 100) {
+                this.tabHistory.pop();
+            }
+            // Save the tab history in the settings
+            const workspaceId = this.getWorkspaceId();
+            this.tabHistoryPerWorkspace[workspaceId] = this.tabHistory;
+
+            // Debug log
+            // console.log("Updated tabHistory for workspace:", workspaceId, this.tabHistory);
+
+            this.settings.tabHistoryPerWorkspace = this.tabHistoryPerWorkspace;
+            this.saveSettings();
+
+            // Clear leaves so they are reloaded with new history
+            this.leaves = null;
+        }
+    }
+
+    onLayoutChange() {
+        const workspaceId = this.getWorkspaceId();
+        this.tabHistory = this.tabHistoryPerWorkspace[workspaceId] || [];
+
+        // Debug log
+        // console.log("Layout changed. Loaded tabHistory for workspace:", workspaceId, this.tabHistory);
+
+        // Rebuild leaves based on the restored tab history
+        this.leaves = null;
+        this.setLeaves();
+    }
+
+    getWorkspaceId(): string {
+        const workspacesPlugin = this.app.internalPlugins.plugins['workspaces'];
+        if (workspacesPlugin && workspacesPlugin.enabled) {
+            const activeWorkspace = workspacesPlugin.instance.activeWorkspace;
+            if (activeWorkspace) {
+                // Debug log
+                // console.log("Current workspaceId (from workspace name):", activeWorkspace);
+                return activeWorkspace;
+            } else {
+                console.warn("No active workspace found, using default workspaceId.");
+                return "default";
+            }
+        } else {
+            console.warn("Workspaces plugin is not enabled, using default workspaceId.");
+            return "default";
         }
     }
 
@@ -260,7 +363,7 @@ export default class CycleThroughPanes extends Plugin {
             this.ctrlPressedTimestamp = e.timeStamp;
             this.ctrlKeyCode = e.code;
 
-            // clean slate -- prevent ctrl keystroke from accidentally switching to another tab
+            // Clean slate -- prevent ctrl keystroke from accidentally switching to another tab
             this.queuedFocusLeaf = undefined;
         }
     }
@@ -292,13 +395,13 @@ export default class CycleThroughPanes extends Plugin {
     }
 
     onunload() {
-        console.log("unloading plugin: Cycle through panes");
+        // console.log("Unloading plugin: Cycle through panes");
         window.removeEventListener("keydown", this.keyDownFunc);
         window.removeEventListener("keyup", this.keyUpFunc);
     }
 
     async loadSettings() {
-        // returns null if .obsidian/plugins/cycle-through-panes/data.json does not exist
+        // Load data from .obsidian/plugins/cycle-through-panes/data.json
         const userSettings = await this.loadData();
 
         this.settings = Object.assign(
@@ -306,9 +409,13 @@ export default class CycleThroughPanes extends Plugin {
             DEFAULT_SETTINGS,
             userSettings ? userSettings : NEW_USER_SETTINGS
         );
+
+        // Initialize tabHistoryPerWorkspace
+        this.tabHistoryPerWorkspace = this.settings.tabHistoryPerWorkspace || {};
     }
 
     async saveSettings() {
+        this.settings.tabHistoryPerWorkspace = this.tabHistoryPerWorkspace;
         await this.saveData(this.settings);
     }
 }

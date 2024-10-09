@@ -1,24 +1,31 @@
 export interface Settings {
-    viewTypes: string[];
-    showModal: boolean;
     skipPinned: boolean;
-    stayInSplit: boolean;
-    focusLeafOnKeyUp: boolean;
     useViewTypes: boolean;
+    viewTypes: string[];
+    focusLeafOnKeyUp: boolean;
+    showModal: boolean;
+    stayInSplit: boolean;
+    tabHistoryPerWorkspace: { [workspaceId: string]: string[] };
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-    viewTypes: ["markdown", "canvas", "pdf"],
-    showModal: true,
-    skipPinned: false,
-    stayInSplit: true,
-    focusLeafOnKeyUp: false, // opt-in for existing users
-    useViewTypes: true,
+    skipPinned: true,
+    useViewTypes: false,
+    viewTypes: [],
+    focusLeafOnKeyUp: false,
+    showModal: false,
+    stayInSplit: false,
+    tabHistoryPerWorkspace: {},
 };
 
-export const NEW_USER_SETTINGS: Partial<Settings> = {
-    focusLeafOnKeyUp: true, // default for new users
+export const NEW_USER_SETTINGS: Settings = {
+    skipPinned: false,
     useViewTypes: false,
+    viewTypes: [],
+    focusLeafOnKeyUp: true,
+    showModal: false,
+    stayInSplit: false,
+    tabHistoryPerWorkspace: {},
 };
 
 declare module "obsidian" {
