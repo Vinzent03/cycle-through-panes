@@ -5,6 +5,9 @@ import { GeneralModal } from "./modal";
 import CTPSettingTab from "./settingsTab";
 import { DEFAULT_SETTINGS, NEW_USER_SETTINGS, Settings } from "./types";
 
+// verbosity setting
+const VERBOSE = true;
+
 export default class CycleThroughPanes extends Plugin {
     settings: Settings;
     ctrlPressedTimestamp = 0;
@@ -58,8 +61,10 @@ export default class CycleThroughPanes extends Plugin {
     }
 
     async onload() {
-        // console.log("Loading plugin: Cycle through panes");
-
+        if (VERBOSE) {
+            console.log("Loading plugin: Cycle through panes");
+        }
+        
         await this.loadSettings();
 
         this.addSettingTab(new CTPSettingTab(this, this.settings));
@@ -70,7 +75,9 @@ export default class CycleThroughPanes extends Plugin {
             this.tabHistory = this.tabHistoryPerWorkspace[workspaceId] || [];
 
             // Debug log
-            // console.log("Loaded tabHistory for workspace:", workspaceId, this.tabHistory);
+            if (VERBOSE) {
+                console.log("Loaded tabHistory for workspace:", workspaceId, this.tabHistory);
+            }
         });
 
         // Add commands
@@ -110,6 +117,10 @@ export default class CycleThroughPanes extends Plugin {
                             this.settings.viewTypes
                         );
                         const index = leaves.indexOf(active);
+
+                        if (VERBOSE) {
+                            console.log("index of active leaf", index);
+                        }
 
                         if (index !== undefined) {
                             if (index === 0) {
@@ -271,19 +282,31 @@ export default class CycleThroughPanes extends Plugin {
 
     setLeaves() {
         if (!this.leaves) {
+
+            if (VERBOSE) {
+                console.log("Setting leaves based on tab history because leaves is null");
+            }
+
             const leaves = this.getLeavesOfTypes(this.settings.viewTypes);
             const filePathToLeaf = new Map<string, WorkspaceLeaf>();
+
+            // show the file object of the 0th leaf
+            if (VERBOSE) {
+                console.log("Leaf Name of 0th leaf:", leaves[0].view.getDisplayText());
+                console.log("There are total", leaves.length, "leaves");
+            }
+
             for (const leaf of leaves) {
-                const file = leaf.view.file;
+                const file = leaf.view.getDisplayText();
                 if (file) {
-                    filePathToLeaf.set(file.path, leaf);
+                    filePathToLeaf.set(file, leaf);
                 }
             }
-            this.leaves = [];
-            for (const path of this.tabHistory) {
-                const leaf = filePathToLeaf.get(path);
+            this.leaves = []; // this will be an array of WorkspaceLeaf objects
+            for (const path of this.tabHistory) { // this.tabHistory is an array of strings representing the file paths of the tabs
+                const leaf = filePathToLeaf.get(path); // 
                 if (leaf) {
-                    this.leaves.push(leaf);
+                    this.leaves.push(leaf); // this will be an array of WorkspaceLeaf objects, in python this would be like leaves.append(leaf)
                 }
             }
             // Add any leaves not in tabHistory to the end
@@ -295,20 +318,22 @@ export default class CycleThroughPanes extends Plugin {
             this.leafIndex = this.leaves.indexOf(this.app.workspace.activeLeaf);
 
             // Debug log
-            // console.log("Set leaves based on tab history:", this.leaves);
+            if (VERBOSE) {
+                console.log("Set leaves based on tab history:", this.leaves);
+            }
         }
     }
 
     onActiveLeafChange(leaf: WorkspaceLeaf) {
-        const file = leaf.view.file;
+        const file = leaf.view.getDisplayText();
         if (file) {
             // Remove the file path if it exists in the history
-            const index = this.tabHistory.indexOf(file.path);
+            const index = this.tabHistory.indexOf(file);
             if (index !== -1) {
                 this.tabHistory.splice(index, 1);
             }
             // Add the file path to the start of the history
-            this.tabHistory.unshift(file.path);
+            this.tabHistory.unshift(file);
             // Keep the history to a reasonable length
             if (this.tabHistory.length > 100) {
                 this.tabHistory.pop();
@@ -318,7 +343,9 @@ export default class CycleThroughPanes extends Plugin {
             this.tabHistoryPerWorkspace[workspaceId] = this.tabHistory;
 
             // Debug log
-            // console.log("Updated tabHistory for workspace:", workspaceId, this.tabHistory);
+            if (VERBOSE) {
+                console.log("Updated tabHistory for workspace:", workspaceId, this.tabHistory);
+            }
 
             this.settings.tabHistoryPerWorkspace = this.tabHistoryPerWorkspace;
             this.saveSettings();
@@ -330,10 +357,12 @@ export default class CycleThroughPanes extends Plugin {
 
     onLayoutChange() {
         const workspaceId = this.getWorkspaceId();
-        this.tabHistory = this.tabHistoryPerWorkspace[workspaceId] || [];
+        this.tabHistory = this.tabHistoryPerWorkspace[workspaceId] || []; // this will basically restore the tab history for the workspace
 
         // Debug log
-        // console.log("Layout changed. Loaded tabHistory for workspace:", workspaceId, this.tabHistory);
+        if (VERBOSE) {
+            console.log("Layout changed. Loaded tabHistory for workspace:", workspaceId, this.tabHistory);
+        }
 
         // Rebuild leaves based on the restored tab history
         this.leaves = null;
@@ -346,7 +375,9 @@ export default class CycleThroughPanes extends Plugin {
             const activeWorkspace = workspacesPlugin.instance.activeWorkspace;
             if (activeWorkspace) {
                 // Debug log
-                // console.log("Current workspaceId (from workspace name):", activeWorkspace);
+                if (VERBOSE) {
+                    console.log("Current workspaceId (from workspace name):", activeWorkspace);
+                }
                 return activeWorkspace;
             } else {
                 console.warn("No active workspace found, using default workspaceId.");
@@ -395,14 +426,20 @@ export default class CycleThroughPanes extends Plugin {
     }
 
     onunload() {
-        // console.log("Unloading plugin: Cycle through panes");
+        if (VERBOSE) {
+            console.log("Unloading plugin: Cycle through panes");
+        }
         window.removeEventListener("keydown", this.keyDownFunc);
         window.removeEventListener("keyup", this.keyUpFunc);
     }
 
     async loadSettings() {
         // Load data from .obsidian/plugins/cycle-through-panes/data.json
-        const userSettings = await this.loadData();
+        const userSettings = await this.loadData(); // here, this is the settings object which is a JSON object. Obsidian has a built-in function to load data from a file.
+
+        if (VERBOSE) {
+            console.log('Before Object.assign: userSettings:', userSettings);
+        }
 
         this.settings = Object.assign(
             {},
@@ -410,8 +447,15 @@ export default class CycleThroughPanes extends Plugin {
             userSettings ? userSettings : NEW_USER_SETTINGS
         );
 
+        console.log('After Object.assign: this.settings:', this.settings);
+
         // Initialize tabHistoryPerWorkspace
-        this.tabHistoryPerWorkspace = this.settings.tabHistoryPerWorkspace || {};
+        this.tabHistoryPerWorkspace = this.settings.tabHistoryPerWorkspace || {}; // here `this` refers to the plugin object. The `settings` object is a property of the plugin object, and the `tabHistoryPerWorkspace` is a property of the `settings` object.
+
+        if (VERBOSE) {
+            console.log('Final this.tabHistoryPerWorkspace:', this.tabHistoryPerWorkspace);
+        }
+        
     }
 
     async saveSettings() {
